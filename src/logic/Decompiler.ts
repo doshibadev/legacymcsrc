@@ -38,7 +38,7 @@ const decompilerOptions = combineLatest([
 decompilerOptions.subscribe(v => worker.setOptions(v));
 
 export const currentResult = decompileResultPipeline(minecraftJar);
-export function decompileResultPipeline(jar: Observable<MinecraftJar>): Observable<DecompileResult> {
+export function decompileResultPipeline(jar: Observable<MinecraftJar>): Observable<DecompileResult | null> {
     return combineLatest([
         selectedFile,
         jar,
