@@ -1,19 +1,15 @@
-import { editor } from "monaco-editor";
+import { editor, type IPosition } from "monaco-editor";
 import { type Token } from '../logic/Tokens';
 
-export function findTokenAtPosition(
-    editor: editor.ICodeEditor,
+export function findTokenAtModelPosition(
+    model: editor.ITextModel,
+    position: IPosition,
     decompileResult: { tokens: Token[]; } | undefined,
     classList: string[] | undefined,
-    useClassList = true
+    useClassList = true,
+    skipDeclarations = false
 ): Token | null {
-    const model = editor.getModel();
     if (!model || !decompileResult || (useClassList && !classList)) {
-        return null;
-    }
-
-    const position = editor.getPosition();
-    if (!position) {
         return null;
     }
 
@@ -28,6 +24,10 @@ export function findTokenAtPosition(
     targetOffset = charCount + (column - 1);
 
     for (const token of decompileResult.tokens) {
+        if (skipDeclarations && token.declaration) {
+            continue;
+        }
+
         if (targetOffset >= token.start && targetOffset <= token.start + token.length) {
             const baseClassName = token.className.split('$')[0];
             const className = baseClassName + ".class";
@@ -42,4 +42,21 @@ export function findTokenAtPosition(
     }
 
     return null;
+}
+
+export function findTokenAtPosition(
+    editor: editor.ICodeEditor,
+    decompileResult: { tokens: Token[]; } | undefined,
+    classList: string[] | undefined,
+    useClassList = true,
+    overridePosition?: IPosition,
+    skipDeclarations = false
+): Token | null {
+    const model = editor.getModel();
+    if (!model) return null;
+
+    const position = overridePosition || editor.getPosition();
+    if (!position) return null;
+
+    return findTokenAtModelPosition(model, position, decompileResult, classList, useClassList, skipDeclarations);
 }

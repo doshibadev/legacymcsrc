@@ -65,7 +65,6 @@ export class JarIndex {
         if (this._workers) return this._workers;
         const threads = navigator.hardwareConcurrency || 4;
         this._workers = Array.from({ length: threads }, () => createWrorker());
-        console.log(`Created JarIndex with ${threads} workers`);
         return this._workers;
     }
 
@@ -96,10 +95,7 @@ export class JarIndex {
 
     private async performIndexing(): Promise<void> {
         try {
-            const startTime = performance.now();
-
             indexProgress.next(0);
-            console.log(`Indexing minecraft jar using ${this.workers.length} workers`);
 
             // Initialize all workers in parallel
             await Promise.all(this.workers.map(worker => worker.c.setJar(this.minecraftJar.version, this.minecraftJar.blob)));
@@ -133,12 +129,7 @@ export class JarIndex {
                 })());
             }
 
-            const indexedCounts = await Promise.all(promises);
-            const totalIndexed = indexedCounts.reduce((sum, count) => sum + count, 0);
-
-            const endTime = performance.now();
-            const duration = ((endTime - startTime) / 1000).toFixed(2);
-            console.log(`Indexing completed in ${duration} seconds. Total indexed: ${totalIndexed}`);
+            await Promise.all(promises);
             indexProgress.next(-1);
         } catch (error) {
             // Reset promise on error so indexing can be retried

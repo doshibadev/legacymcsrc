@@ -78,6 +78,41 @@ public class Indexer {
     }
     
     @JSExport
+    public static void loadSrg(String srgText) {
+        McpRemapper.loadSrg(srgText);
+    }
+
+    @JSExport
+    public static void loadMethodCsv(String csv) {
+        McpRemapper.loadMethodCsv(csv);
+    }
+
+    @JSExport
+    public static void loadFieldCsv(String csv) {
+        McpRemapper.loadFieldCsv(csv);
+    }
+
+    @JSExport
+    public static void loadParamCsv(String csv) {
+        McpRemapper.loadParamCsv(csv);
+    }
+
+    @JSExport
+    public static void prepass(ArrayBuffer classBytes) {
+        McpRemapper.prepass(classBytes);
+    }
+
+    @JSExport
+    public static ArrayBuffer remap(ArrayBuffer classBytes) {
+        return McpRemapper.remap(classBytes);
+    }
+
+    @JSExport
+    public static String remapInternalName(String internalName) {
+        return McpRemapper.remapInternalName(internalName);
+    }
+
+    @JSExport
     public static String[] getClassData() {
         List<String> result = new ArrayList<>();
         for (ClassInheritanceInfo info : inheritanceData.values()) {

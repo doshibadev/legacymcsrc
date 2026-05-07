@@ -1,6 +1,8 @@
 import type { CancellationToken, IPosition, IRange, languages } from "monaco-editor";
 import { editor, Range, Uri } from "monaco-editor";
 import { openCodeTab } from '../logic/tabs';
+import { findTokenAtModelPosition, findTokenAtPosition } from './CodeUtils';
+import { bytecode } from '../logic/Settings';
 import { getTokenLocation } from '../logic/Tokens';
 import { selectedFile } from "../logic/State";
 import type { DecompileResult } from "../workers/decompile/types";
@@ -46,7 +48,7 @@ export function jumpToToken(
         const { line, column } = getTokenLocation(result, token);
         editor.setSelection(new Range(line, column, line, column + token.length));
         editor.revealLineInCenter(line, 0);
-        break;
+        return;
     }
 
     console.warn(`jumpToToken: Target ${targetType} "${target}" not found in ${result.className}`);
@@ -58,57 +60,26 @@ export function createDefinitionProvider(
 ) {
     return {
         provideDefinition(model: editor.ITextModel, position: IPosition, token: CancellationToken) {
-            const { lineNumber, column } = position;
+            const tokenFound = findTokenAtModelPosition(
+                model,
+                position,
+                decompileResultRef.current,
+                classListRef.current,
+                true,
+                true
+            );
 
-            if (!decompileResultRef.current) {
-                console.error("No decompile result available for definition provider.");
-                return null;
-            }
+            if (tokenFound) {
+                const className = tokenFound.className + ".class";
 
-            const decompileResult = decompileResultRef.current;
-            const classList = classListRef.current;
-
-            const lines = model.getLinesContent();
-            let charCount = 0;
-            let targetOffset = 0;
-
-            for (let i = 0; i < lineNumber - 1; i++) {
-                charCount += lines[i].length + 1; // +1 for \n
-            }
-            targetOffset = charCount + (column - 1);
-
-            for (const token of decompileResult.tokens) {
-                if (token.declaration) {
-                    continue;
-                }
-
-                if (targetOffset >= token.start && targetOffset <= token.start + token.length) {
-                    const className = token.className + ".class";
-                    const baseClassName = token.className.split('$')[0] + ".class";
-                    console.log(`Found token for definition: ${className} at offset ${token.start}`);
-
-                    if (classList && (classList.includes(className) || classList.includes(baseClassName))) {
-                        const targetClass = className;
-                        const range = new Range(lineNumber, column, lineNumber, column + token.length);
-
-                        return {
-                            uri: "descriptor" in token ?
-                                Uri.parse(`goto://class/${className}#${token.type}:${token.type === "method" ?
-                                    `${token.name}:${token.descriptor}` : token.name
-                                    }`) :
-                                Uri.parse(`goto://class/${className}`),
-                            range
-                        };
-                    }
-
-                    // Library or java classes.
-                    return null;
-                }
-
-                // Tokens are sorted, we know we can stop searching
-                if (token.start > targetOffset) {
-                    break;
-                }
+                return {
+                    uri: "descriptor" in tokenFound ?
+                        Uri.parse(`goto://class/${className}#${tokenFound.type}:${tokenFound.type === "method" ?
+                            `${tokenFound.name}:${tokenFound.descriptor}` : tokenFound.name
+                        }`) :
+                        Uri.parse(`goto://class/${className}`),
+                    range: new Range(position.lineNumber, position.column, position.lineNumber, position.column + tokenFound.length)
+                };
             }
 
             return null;

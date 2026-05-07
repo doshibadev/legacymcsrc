@@ -48,16 +48,24 @@ export class JarIndexer {
         }
 
         const currentJar = this.#jar; // Capture for closure
-        const arrayBufferPromises = classNames.map(async className => {
+        const classBuffers = classNames.map(async className => {
             const entry = currentJar.entries[className];
             const data = await entry.blob();
-            return data.arrayBuffer();
+            return {
+                className,
+                arrayBuffer: await data.arrayBuffer(),
+            };
         });
 
         const indexer = await this.getIndexer();
 
-        for (const arrayBuffer of arrayBufferPromises) {
-            indexer.index(await arrayBuffer);
+        for (const classBuffer of classBuffers) {
+            const { className, arrayBuffer } = await classBuffer;
+            try {
+                indexer.index(arrayBuffer);
+            } catch (error) {
+                console.warn(`Failed to index ${className}`, error);
+            }
         }
     };
 

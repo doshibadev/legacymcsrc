@@ -23,7 +23,10 @@ const decompilerOptions = combineLatest([
 ]).pipe(
     distinctUntilChanged(),
     switchMap(([displayLambdas]) => {
-        const options: Options = {};
+        const options: Options = {
+            "use-lvt-names": "1",
+            "use-method-parameters": "1",
+        };
 
         if (displayLambdas) {
             options["mark-corresponding-synthetics"] = "1";
@@ -43,10 +46,10 @@ export function decompileResultPipeline(jar: Observable<MinecraftJar>): Observab
         decompilerOptions,
     ]).pipe(
         distinctUntilChanged(),
-        throttleTime(250),
+        throttleTime(250, undefined, { leading: true, trailing: true }),
         switchMap(([className, jar, bytecode]) => {
             if (!className) {
-                return of();
+                return of(null);
             }
 
             if (bytecode) {

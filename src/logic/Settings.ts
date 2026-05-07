@@ -147,7 +147,7 @@ export const unifiedDiff = new BooleanSetting('unified_diff', false);
 export const focusSearch = new KeybindSetting('focus_search', 'Ctrl+ ');
 export const showStructure = new KeybindSetting('show_structure', 'Ctrl+F12');
 
-export const preferWasmDecompiler = new BooleanSetting('prefer_wasm_decompiler', true);
+export const preferWasmDecompiler = new BooleanSetting('prefer_wasm_decompiler_1_7_10', false);
 preferWasmDecompiler.observable
     .pipe(distinctUntilChanged())
     .subscribe((v) => decompiler.setRuntime(v));

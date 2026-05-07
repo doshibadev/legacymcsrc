@@ -7,7 +7,7 @@ const initialState = getInitialState();
 
 /// All of the user controled global state should be defined here:
 
-export const selectedMinecraftVersion = new BehaviorSubject<string | null>(initialState.minecraftVersion);
+export const selectedMinecraftVersion = new BehaviorSubject<string | null>("1.7.10");
 
 export const mobileDrawerOpen = new BehaviorSubject(false);
 export const selectedFile = new BehaviorSubject<string | undefined>(initialState.file);
@@ -24,8 +24,9 @@ export interface SelectedLines {
 }
 export const selectedLines = new BehaviorSubject<SelectedLines | null>(initialState.selectedLines);
 
-export const diffView = new BehaviorSubject<boolean>(!!initialState.diff);
-export const diffLeftSelectedMinecraftVersion = new BehaviorSubject<string | null>(initialState.diff?.leftMinecraftVersion ?? null);
+// Diff between Minecraft versions is disabled in this fork (single 1.7.10 only).
+export const diffView = new BehaviorSubject<boolean>(false);
+export const diffLeftSelectedMinecraftVersion = new BehaviorSubject<string | null>(null);
 
 // Reset selected lines when file changes (skip initial emission to preserve permalink selection)
 selectedFile.pipe(pairwise()).subscribe(([previousFile, currentFile]) => {

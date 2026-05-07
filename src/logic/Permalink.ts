@@ -1,9 +1,9 @@
 import { combineLatest } from "rxjs";
 import { resetPermalinkAffectingSettings, supportsPermalinking } from "./Settings";
-import { diffLeftSelectedMinecraftVersion, diffView, selectedFile, selectedLines, selectedMinecraftVersion } from "./State";
+import { selectedFile, selectedLines, selectedMinecraftVersion } from "./State";
 
 export interface State {
-    version: number; // Allows us to change the permalink structure in the future
+    version: number;
     minecraftVersion: string;
     file: string | undefined;
     selectedLines: {
@@ -15,15 +15,25 @@ export interface State {
     };
 }
 
+const HARDCODED_MC_VERSION = "1.7.10";
+
 const DEFAULT_STATE: State = {
     version: 0,
-    minecraftVersion: "",
+    minecraftVersion: HARDCODED_MC_VERSION,
     file: undefined,
     selectedLines: null
 };
 
+const normalizeMinecraftVersion = (version: string): string =>
+    version === "25w45a" ? "25w45a_unobfuscated" : version;
+
+const withClassExtension = (filePath: string): string =>
+    filePath + (filePath.endsWith('.class') ? '' : '.class');
+
+const looksLikeMinecraftVersion = (segment: string): boolean =>
+    /^(\d|[a-z]*\d)/i.test(segment);
+
 export const parsePathToState = (path: string): State | null => {
-    // Check for line number marker (e.g., #L123 or #L10-20)
     let lineNumber: number | null = null;
     let lineEnd: number | null = null;
     const lineMatch = path.match(/(?:#|%23)L(\d+)(?:-(\d+))?$/);
@@ -42,40 +52,50 @@ export const parsePathToState = (path: string): State | null => {
     }
 
     const version = parseInt(segments[0], 10);
+    const selectedLines = lineNumber ? { line: lineNumber, lineEnd: lineEnd || undefined } : null;
 
-    if (segments[1] === 'diff') {
+    if (segments[1] === "diff") {
         if (segments.length < 4) {
             return null;
         }
-        const leftMinecraftVersion = decodeURIComponent(segments[2]);
-        const rightMinecraftVersion = decodeURIComponent(segments[3]);
+
+        const leftMinecraftVersion = normalizeMinecraftVersion(decodeURIComponent(segments[2]));
+        const minecraftVersion = normalizeMinecraftVersion(decodeURIComponent(segments[3]));
         const filePath = segments.slice(4).join('/');
+
         return {
             version,
-            minecraftVersion: rightMinecraftVersion,
-            file: filePath ? filePath + (filePath.endsWith('.class') ? '' : '.class') : undefined,
-            selectedLines: null,
+            minecraftVersion,
+            file: filePath ? withClassExtension(filePath) : undefined,
+            selectedLines,
             diff: { leftMinecraftVersion }
         };
     }
 
-    if (segments.length < 3) {
+    if (segments.length === 2 && looksLikeMinecraftVersion(segments[1])) {
         return null;
     }
 
-    let minecraftVersion = decodeURIComponent(segments[1]);
-    const filePath = segments.slice(2).join('/');
+    const hasExplicitMinecraftVersion = segments.length >= 3 && !["net", "com", "org"].includes(segments[1]);
+    if (hasExplicitMinecraftVersion) {
+        const minecraftVersion = normalizeMinecraftVersion(decodeURIComponent(segments[1]));
+        const filePath = segments.slice(2).join('/');
 
-    // Backwards compatibility with the incorrect version name used previously
-    if (minecraftVersion == "25w45a") {
-        minecraftVersion = "25w45a_unobfuscated";
+        return {
+            version,
+            minecraftVersion,
+            file: withClassExtension(filePath),
+            selectedLines
+        };
     }
+
+    const filePath = segments.slice(1).join('/');
 
     return {
         version,
-        minecraftVersion,
-        file: filePath + (filePath.endsWith('.class') ? '' : '.class'),
-        selectedLines: lineNumber ? { line: lineNumber, lineEnd: lineEnd || undefined } : null
+        minecraftVersion: HARDCODED_MC_VERSION,
+        file: withClassExtension(filePath),
+        selectedLines
     };
 };
 
@@ -85,12 +105,10 @@ export const getInitialState = (): State => {
 
     const newStyle = pathname !== '/' && pathname !== '';
 
-    // Use pathname if it's not just "/" (new style), otherwise use hash (old style)
     let path = newStyle
-        ? pathname.slice(1) // Remove leading /
+        ? pathname.slice(1)
         : (hash.startsWith('#/') ? hash.slice(2) : (hash.startsWith('#') ? hash.slice(1) : ''));
 
-    // For new style (pathname-based), append hash if it contains line number
     if (newStyle && hash.startsWith('#L')) {
         path += hash;
     }
@@ -113,32 +131,24 @@ if (typeof window !== "undefined") {
     window.addEventListener('load', () => {
         combineLatest([
             selectedMinecraftVersion,
-            diffLeftSelectedMinecraftVersion,
             selectedFile,
             selectedLines,
             supportsPermalinking,
-            diffView
         ]).subscribe(([
-            minecraftVersion,
-            diffLeftMinecraftVersion,
+            ,
             file,
             selectedLines,
             supported,
-            diffView
         ]) => {
-            if (!file && !diffView) {
+            if (!file) {
                 document.title = "mcsrc.dev";
                 window.location.hash = '';
                 window.history.replaceState({}, '', '/');
                 return;
             }
 
-            if (file) {
-                const className = file.split('/').pop()?.replace('.class', '') || file;
-                document.title = className;
-            } else {
-                document.title = "mcsrc.dev";
-            }
+            const className = file.split('/').pop()?.replace('.class', '') || file;
+            document.title = className;
 
             if (!supported) {
                 window.location.hash = '';
@@ -146,23 +156,14 @@ if (typeof window !== "undefined") {
                 return;
             }
 
-            let url = '/1/';
+            let url = `/1/${file.replace(".class", "")}`;
 
-            if (diffView) {
-                url += `diff/${diffLeftMinecraftVersion}/${minecraftVersion}`;
-                if (file) {
-                    url += `/${file.replace(".class", "")}`;
-                }
-            } else {
-                url += `${minecraftVersion}/${file!.replace(".class", "")}`;
-
-                if (selectedLines) {
-                    const { line, lineEnd } = selectedLines;
-                    if (lineEnd && lineEnd !== line) {
-                        url += `#L${Math.min(line, lineEnd)}-${Math.max(line, lineEnd)}`;
-                    } else {
-                        url += `#L${line}`;
-                    }
+            if (selectedLines) {
+                const { line, lineEnd } = selectedLines;
+                if (lineEnd && lineEnd !== line) {
+                    url += `#L${Math.min(line, lineEnd)}-${Math.max(line, lineEnd)}`;
+                } else {
+                    url += `#L${line}`;
                 }
             }
 

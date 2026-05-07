@@ -55,6 +55,8 @@ const Code = () => {
     const decompileResultRef = useRef(decompileResult);
     const classListRef = useRef(classList);
 
+    const [editorInstance, setEditorInstance] = useState<editor.IStandaloneCodeEditor | null>(null);
+
     const [messageApi, contextHolder] = message.useMessage();
 
     const [resetViewTrigger, setResetViewTrigger] = useState(false);
@@ -63,7 +65,7 @@ const Code = () => {
         if (!decompileResult) return;
 
         // Reapply token decorations for the current tab
-        if (editorRef.current && decompileResult.tokens) {
+        if (editorInstance && decompileResult.tokens) {
             const decorations = decompileResult.tokens.map(token => {
                 const startPos = model.getPositionAt(token.start);
                 const endPos = model.getPositionAt(token.start + token.length);
@@ -78,7 +80,7 @@ const Code = () => {
             });
 
             decorationsCollectionRef.current?.clear();
-            decorationsCollectionRef.current = editorRef.current.createDecorationsCollection(decorations);
+            decorationsCollectionRef.current = editorInstance.createDecorationsCollection(decorations);
         }
     }
 
@@ -94,9 +96,7 @@ const Code = () => {
     }, [monaco, darkMode]);
 
     useEffect(() => {
-        if (!monaco) return;
-        if (!editorRef.current) return;
-        const editor = editorRef.current;
+        if (!monaco || !editorInstance) return;
 
         const definitionProvider = monaco.languages.registerDefinitionProvider(
             "java",
@@ -140,11 +140,11 @@ const Code = () => {
             createViewInheritanceAction(decompileResultRef, messageApi, (value) => selectedInheritanceClassName.next(value))
         );
 
-        const bytecode = setupJavaBytecodeLanguage(monaco);
+        const bytecodeLang = setupJavaBytecodeLanguage(monaco);
 
         return () => {
             // Dispose in the oppsite order
-            bytecode.dispose();
+            bytecodeLang.dispose();
             viewInheritance.dispose();
             viewAllReferences.dispose();
             copyMixin.dispose();
@@ -155,36 +155,35 @@ const Code = () => {
             hoverProvider.dispose();
             definitionProvider.dispose();
         };
-    }, [monaco, decompileResult, classList, resetViewTrigger, messageApi]);
+    }, [monaco, editorInstance, resetViewTrigger, messageApi]);
 
     if (IS_JAVADOC_EDITOR) {
         useEffect(() => {
-            if (!monaco || !editorRef.current || !decompileResult) return;
+            if (!monaco || !editorInstance || !decompileResult) return;
 
-            const extensions = applyJavadocCodeExtensions(monaco, editorRef.current, decompileResult);
+            const extensions = applyJavadocCodeExtensions(monaco, editorInstance, decompileResult);
 
             return () => {
                 extensions.dispose();
             };
             // oxlint-disable-next-line eslint-plugin-react-hooks/exhaustive-deps
-        }, [monaco, editorRef.current, decompileResult]);
+        }, [monaco, editorInstance, decompileResult]);
     }
 
     // Scroll to top when source changes, or to specific line if specified
     useEffect(() => {
-        if (editorRef.current && decompileResult) {
-            const editor = editorRef.current;
+        if (editorInstance && decompileResult) {
             lineHighlightRef.current?.clear();
 
             const executeScroll = () => {
                 const currentLine = selectedLine?.line;
                 if (currentLine) {
                     const lineEnd = selectedLine?.lineEnd ?? currentLine;
-                    editor.setSelection(new Range(currentLine, 1, currentLine, 1));
-                    editor.revealLinesInCenterIfOutsideViewport(currentLine, lineEnd);
+                    editorInstance.setSelection(new Range(currentLine, 1, currentLine, 1));
+                    editorInstance.revealLinesInCenterIfOutsideViewport(currentLine, lineEnd);
 
                     // Highlight the line range
-                    lineHighlightRef.current = editor.createDecorationsCollection([{
+                    lineHighlightRef.current = editorInstance.createDecorationsCollection([{
                         range: new Range(currentLine, 1, lineEnd, 1),
                         options: {
                             isWholeLine: true,
@@ -200,14 +199,12 @@ const Code = () => {
                 executeScroll();
             });
         }
-    }, [decompileResult, selectedLine]);
+    }, [decompileResult, selectedLine, editorInstance]);
 
     // Scroll to a "Find All References" token
     useEffect(() => {
-        if (editorRef.current && decompileResult) {
+        if (editorInstance && decompileResult) {
             if (decompileResult.language !== "java") return;
-
-            const editor = editorRef.current;
 
             lineHighlightRef.current?.clear();
 
@@ -217,8 +214,8 @@ const Code = () => {
 
                 if (nextJumpLocation) {
                     const { line, column, length } = nextJumpLocation;
-                    editor.revealLinesInCenterIfOutsideViewport(line, line);
-                    editor.setSelection(new Range(line, column, line, column + length));
+                    editorInstance.revealLinesInCenterIfOutsideViewport(line, line);
+                    editorInstance.setSelection(new Range(line, column, line, column + length));
                 }
             };
 
@@ -226,7 +223,7 @@ const Code = () => {
                 executeScroll();
             });
         }
-    }, [decompileResult, nextReference]);
+    }, [decompileResult, nextReference, editorInstance]);
 
     // Subscribe to tab changes and store model & viewstate of previously opened tab
     useEffect(() => {
@@ -258,7 +255,7 @@ const Code = () => {
     // Handles setting the model and viewstate of the editor
     useEffect(() => {
         if (diffView.value) return;
-        if (!monaco || !decompileResult) return;
+        if (!monaco || !decompileResult || !editorInstance) return;
 
         const tab = getOpenTab();
         if (!tab || !(tab instanceof CodeTab)) return;
@@ -269,58 +266,63 @@ const Code = () => {
         // so this is quite important to keep!
         if (!tab.key.includes(decompileResult.className)) return;
 
-        tab.editorRef = editorRef.current;
+        tab.editorRef = editorInstance;
 
-        // Set new model with the current decompilation source
-        tab.setModel(monaco.editor.createModel(
-            decompileResult.source,
-            bytecode.value ? "bytecode" : "java",
-            monaco.Uri.parse(`inmemory://${Date.now()}`)
-        ));
+        // Set new model with the current decompilation source if it's not already correct
+        if (!tab.model || tab.model.isDisposed() || tab.model.getValue() !== decompileResult.source) {
+            const uri = monaco.Uri.parse(`inmemory://${decompileResult.className}${bytecode.value ? '.bytecode' : '.java'}`);
+            let model = monaco.editor.getModel(uri);
+            if (model) {
+                model.setValue(decompileResult.source);
+            } else {
+                model = monaco.editor.createModel(
+                    decompileResult.source,
+                    bytecode.value ? "bytecode" : "java",
+                    uri
+                );
+            }
+            tab.setModel(model);
+        }
 
         // Only restore view state if there's no line to jump to
         // Otherwise the line highlighting effect will handle scrolling
-        if (editorRef.current) {
-            if (!selectedLine) {
-                tab.applyViewToEditor(editorRef.current);
-            } else {
-                // Just set the model without restoring view state
-                if (tab.model) {
-                    editorRef.current.setModel(tab.model);
-                }
+        if (!selectedLine) {
+            tab.applyViewToEditor(editorInstance);
+        } else {
+            // Just set the model without restoring view state
+            if (tab.model) {
+                editorInstance.setModel(tab.model);
             }
         }
         applyTokenDecorations(tab.model!);
         // oxlint-disable-next-line eslint-plugin-react-hooks/exhaustive-deps
-    }, [decompileResult, resetViewTrigger, selectedLine, monaco]);
+    }, [decompileResult, resetViewTrigger, selectedLine, monaco, editorInstance]);
 
     // Process pending token jumps after model is loaded
     useEffect(() => {
-        if (!editorRef.current || !decompileResult || !tokenJump) return;
+        if (!editorInstance || !decompileResult || !tokenJump) return;
 
         if (decompileResult.className + ".class" === tokenJump.className) {
             requestAnimationFrame(() => {
-                if (editorRef.current && decompileResult) {
-                    jumpToToken(decompileResult, tokenJump.targetType, tokenJump.target, editorRef.current);
+                if (editorInstance && decompileResult) {
+                    jumpToToken(decompileResult, tokenJump.targetType, tokenJump.target, editorInstance);
                     clearTokenJump();
                 }
             });
         }
-    }, [decompileResult, tokenJump]);
+    }, [decompileResult, tokenJump, editorInstance]);
 
     // Handle gutter clicks for line linking
     useEffect(() => {
-        if (!editorRef.current) return;
-        const codeEditor = editorRef.current;
+        if (!editorInstance) return;
 
-        const onMouseDown = codeEditor.onMouseDown((e) => {
+        const onMouseDown = editorInstance.onMouseDown((e) => {
             if (e.target.type === editor.MouseTargetType.GUTTER_LINE_NUMBERS ||
                 e.target.type === editor.MouseTargetType.GUTTER_GLYPH_MARGIN) {
                 const lineNumber = e.target.position?.lineNumber;
 
                 if (lineNumber) {
                     // Shift-click to select a range
-                    console.log(selectedLine);
                     if (e.event.shiftKey && selectedLine) {
                         selectedLines.next({ line: selectedLine.line, lineEnd: lineNumber });
                     } else {
@@ -334,7 +336,7 @@ const Code = () => {
             onMouseDown.dispose();
         };
         // oxlint-disable-next-line eslint-plugin-react-hooks/exhaustive-deps
-    }, [editorRef.current, selectedLine]);
+    }, [editorInstance, selectedLine]);
 
     return (
         <Spin
@@ -369,6 +371,7 @@ const Code = () => {
                     editContext: IS_ANDROID_CHROME ? false : undefined, // Disable content editable on Android Chrome to attempt to stop the virtual keyboard from appearing
                 }}
                 onMount={(codeEditor) => {
+                    setEditorInstance(codeEditor);
                     editorRef.current = codeEditor;
 
                     // Update context key when cursor position changes

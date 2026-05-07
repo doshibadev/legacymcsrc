@@ -35,7 +35,7 @@ export default defineConfig({
       // https://predr.ag/blog/debugging-safari-if-at-first-you-succeed/
       'Cache-Control': 'no-store',
       'Cross-Origin-Opener-Policy': 'same-origin',
-      'Cross-Origin-Embedder-Policy': 'require-corp',
+      'Cross-Origin-Embedder-Policy': 'credentialless',
     },
     // For javadoc API during development
     proxy: {

@@ -42,7 +42,6 @@ export function setTokenJavadoc(token: Token, javadoc: JavadocString | undefined
 
     data.classes[token.className] = classEntry;
     javadocData.next(data);
-    console.log("Updated Javadoc data:", data);
 }
 
 // Refreshes the Javadoc data for a specific class from the server

@@ -163,7 +163,6 @@ function buildGraphData(classNode: ClassNode): { nodes: Node[]; edges: Edge[]; }
         };
     });
 
-    console.log(`Graph built: ${layoutedNodes.length} nodes, ${edges.length} edges`);
     return { nodes: layoutedNodes, edges };
 }
 

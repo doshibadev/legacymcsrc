@@ -10,6 +10,7 @@ repositories {
 dependencies {
     api libs.asm
     api libs.asm.util
+    api libs.asm.commons
     api libs.teavm.core
     testImplementation libs.teavm.jso
 }

@@ -104,7 +104,6 @@ export function getNextJumpToken(decompileResult: DecompileResult): Token | unde
     const { className, query, reference } = referenceNavigation;
 
     if (decompileResult.className != className) {
-        console.log("Decompile result class does not match reference navigation class", decompileResult.className, className);
         return undefined;
     }
 
@@ -155,7 +154,6 @@ export function getNextJumpToken(decompileResult: DecompileResult): Token | unde
     }
 
     if (!referenceTokenIndex) {
-        console.log("Could not find reference token for", reference);
         return undefined;
     }
 
@@ -184,6 +182,5 @@ export function getNextJumpToken(decompileResult: DecompileResult): Token | unde
 
     // Give up if we reach another declaration, it means we didnt find it
     // Just return the declaration that supposedly contains the reference
-    console.log("Could not find token for", query);
     return decompileResult.tokens[referenceTokenIndex];
 }

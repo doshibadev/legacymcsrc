@@ -27,13 +27,14 @@ export class DecompileWorker {
 
     db = new Dexie("decompiler") as Dexie & {
         options: EntityTable<DecompileOption, "key">,
-        results3: Table<DecompileResult, [string, number, string]>,
+        results4: Table<DecompileResult, [string, number, string]>,
     };
 
     constructor() {
-        this.db.version(4).stores({
+        this.db.version(5).stores({
             options: "key",
-            results3: "[className+checksum+language]",
+            results4: "[className+checksum+language]",
+            results3: null,
             // clear old data
             results2: null,
             results: null,
@@ -67,7 +68,7 @@ export class DecompileWorker {
         }
 
         if (changed || notVisited.size > 0) {
-            await this.db.results3.clear();
+            await this.db.results4.clear();
         }
 
         await this.db.options.clear();
@@ -78,8 +79,8 @@ export class DecompileWorker {
         vf.loadRuntime(preferWasm));
 
     clear = (): Promise<number> => this.schedule(async () => {
-        const count = await this.db.results3.count();
-        await this.db.results3.clear();
+        const count = await this.db.results4.count();
+        await this.db.results4.clear();
         return count;
     });
 
@@ -118,7 +119,7 @@ export class DecompileWorker {
                 const checksum = jar.proxy[className]?.checksum;
                 if (!checksum) continue;
 
-                const dbCount = await this.db.results3
+                const dbCount = await this.db.results4
                     .where("[className+checksum+language]")
                     .equals([className, checksum, "java"])
                     .count();
@@ -152,7 +153,7 @@ export class DecompileWorker {
         try {
             const jar = new DecompileJar(await openJar(jarName, jarBlob));
             const checksum = jar.proxy[className]?.checksum;
-            const dbResult = await this.db.results3.get([className, checksum, "java"]);
+            const dbResult = await this.db.results4.get([className, checksum, "java"]);
             if (dbResult) return dbResult;
 
             const result = await this.#decompile(jar.classes, [className], jar.proxy);
@@ -267,13 +268,13 @@ export class DecompileWorker {
             res.push({ className, checksum, source, tokens, language: "java" });
         }
 
-        await this.db.results3.bulkPut(res);
+        await this.db.results4.bulkPut(res);
         return res;
     }
 
     #indexer = new JarIndexer();
     getClassBytecode = (className: string, checksum: number, classData: ArrayBufferLike[]): Promise<DecompileResult> => this.schedule(async () => {
-        let result = await this.db.results3.get([className, checksum, "bytecode"]);
+        let result = await this.db.results4.get([className, checksum, "bytecode"]);
         if (result) return result;
 
         try {
@@ -284,7 +285,7 @@ export class DecompileWorker {
             result = { className, checksum, source: `// Error during bytecode retrieval: ${(e as Error).message}`, tokens: [], language: "bytecode" };
         }
 
-        await this.db.results3.put(result);
+        await this.db.results4.put(result);
         return result;
     });
 }

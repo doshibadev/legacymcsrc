@@ -48,7 +48,6 @@ const DiffCode = () => {
         const lineChanges = editorRef.current.getLineChanges();
         if (lineChanges && lineChanges.length > 0) {
             const firstChange = lineChanges[0];
-            console.log('Navigating to first change at line:', firstChange.modifiedStartLineNumber);
             editorRef.current.revealLineInCenter(firstChange.modifiedStartLineNumber);
         }
     }, [leftResult, rightResult]);

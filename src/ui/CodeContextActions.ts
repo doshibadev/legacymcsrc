@@ -174,7 +174,6 @@ export function createViewInheritanceAction(
             }
 
             const className = decompileResultRef.current.className.replace('.class', '');
-            console.log(`Viewing inheritance for ${className}`);
             openInheritanceViewTab(`hierarchy::${className}`);
         }
     };

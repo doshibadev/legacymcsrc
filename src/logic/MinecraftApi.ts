@@ -1,23 +1,18 @@
-import { BehaviorSubject, combineLatest, distinctUntilChanged, filter, from, map, shareReplay, switchMap, tap, Observable, withLatestFrom } from "rxjs";
+import { BehaviorSubject, distinctUntilChanged, filter, from, of, shareReplay, switchMap } from "rxjs";
 import { agreedEula } from "./Settings";
 import { openJar, type Jar } from "../utils/Jar";
 import { selectedMinecraftVersion } from "./State";
+import { remapJar, type MappingData } from "../workers/remap/client";
+import { strFromU8, unzipSync } from "fflate";
+import { parseLegacyTinyV2 } from "./LegacyTinyV2";
 
 const CACHE_NAME = 'mcsrc-v1';
-const VERSIONS_URL = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
+const DEOBF_CACHE_VERSION = 8;
 
-interface VersionsList {
-    versions: VersionListEntry[];
-}
-
-interface VersionListEntry {
-    id: string;
-    type: string;
-    url: string;
-    time: string;
-    releaseTime: string;
-    sha1: string;
-}
+export const MINECRAFT_VERSION = "1.7.10";
+const VERSION_MANIFEST_URL = "https://piston-meta.mojang.com/v1/packages/ed5d8789ed29872ea2ef1c348302b0c55e3f3468/1.7.10.json";
+const SRG_MAPPINGS_URL = "/mappings/mcp-1.7.10.zip";
+const TINY_MAPPINGS_URL = "/mappings/legacymappings-1.7.10-build.1-pre1-v2.jar";
 
 interface VersionManifest {
     id: string;
@@ -35,50 +30,21 @@ export interface MinecraftJar {
     blob: Blob;
 }
 
-export const minecraftVersions = agreedEula.observable.pipe(
-    filter(agreed => agreed),
-    switchMap(() => from(fetchVersions())),
-    map(versionsList => versionsList.versions),
-    tap(versions => {
-        // On inital load, if we dont have a version selected or the selected version is not valid, default to the latest version.
-        const currentVersion = selectedMinecraftVersion.value;
-        const isValid = currentVersion !== null && versions.some(v => v.id === currentVersion);
+export const minecraftVersionIds = of([MINECRAFT_VERSION]);
 
-        if (!isValid && versions.length > 0) {
-            // Select the latest stable release version if it exists, otherwise fall back to the latest version
-            const latestRelease = versions.find(v => v.type === "release");
-            const defaultVersion = latestRelease ? latestRelease.id : versions[0].id;
-            selectedMinecraftVersion.next(defaultVersion);
-        }
-    }),
+export const downloadProgress = new BehaviorSubject<number | undefined>(undefined);
+export const remapStatus = new BehaviorSubject<string | undefined>(undefined);
+
+export const minecraftJar = agreedEula.observable.pipe(
+    filter(agreed => agreed),
+    switchMap(() => selectedMinecraftVersion),
+    filter((id): id is string => id !== null),
+    distinctUntilChanged(),
+    switchMap(() => from(buildMinecraftJar())),
     shareReplay({ bufferSize: 1, refCount: false })
 );
 
-export const minecraftVersionIds = minecraftVersions.pipe(
-    map(versions => versions.map(v => v.id))
-);
-
-export const downloadProgress = new BehaviorSubject<number | undefined>(undefined);
-
-export const minecraftJar = minecraftJarPipeline(selectedMinecraftVersion);
-export function minecraftJarPipeline(source$: Observable<string | null>): Observable<MinecraftJar> {
-    return combineLatest([
-        source$.pipe(
-            filter(id => id !== null),
-            distinctUntilChanged()
-        ),
-        minecraftVersions
-    ]).pipe(
-        map(([version, versions]) => versions.find(v => v.id === version)),
-        filter((version) => version !== undefined),
-        tap((version) => console.log(`Opening Minecraft jar ${version.id}`)),
-        switchMap(version => from(downloadMinecraftJar(version, downloadProgress))),
-        shareReplay({ bufferSize: 1, refCount: false })
-    );
-}
-
 async function getJson<T>(url: string): Promise<T> {
-    console.log(`Fetching JSON from ${url}`);
     const response = await fetch(url);
 
     if (!response.ok) {
@@ -86,27 +52,6 @@ async function getJson<T>(url: string): Promise<T> {
     }
 
     return response.json();
-}
-
-async function fetchVersions(): Promise<VersionsList> {
-    const mojang = await getJson<VersionsList>(VERSIONS_URL);
-    const filteredMojangVersions = mojang.versions.filter(v => {
-        if (new Date(v.releaseTime).getFullYear() >= 2026) return true;
-        const match = v.id.match(/^(\d+)\.(\d+)/);
-        if (!match) return false;
-        const major = parseInt(match[1], 10);
-        return major >= 26;
-    });
-    const versions = filteredMojangVersions
-        .concat(EXPERIMENTAL_VERSIONS.versions)
-        .sort((a, b) => b.releaseTime.localeCompare(a.releaseTime));
-    return {
-        versions: versions
-    };
-}
-
-async function fetchVersionManifest(version: VersionListEntry): Promise<VersionManifest> {
-    return getJson<VersionManifest>(version.url);
 }
 
 async function cachedFetch(url: string, onProgress?: (percent: number) => void): Promise<Blob> {
@@ -131,7 +76,6 @@ async function cachedFetch(url: string, onProgress?: (percent: number) => void):
 
     const blob = await consumeResponseWithProgress(response, onProgress);
 
-    // Cache the blob after it's been consumed
     await cache.put(url, new Response(blob, {
         headers: response.headers
     }));
@@ -170,110 +114,80 @@ async function consumeResponseWithProgress(response: Response, onProgress?: (per
     return new Blob(chunks);
 }
 
-async function downloadMinecraftJar(version: VersionListEntry, progress: BehaviorSubject<number | undefined>): Promise<MinecraftJar> {
-    console.log(`Downloading Minecraft jar for version: ${version.id}`);
-    const versionManifest = await fetchVersionManifest(version);
-    const clientUrl = versionManifest.downloads.client.url;
+async function downloadMappings(): Promise<MappingData> {
+    const srgBlob = await cachedFetch(SRG_MAPPINGS_URL);
+    const srgZip = unzipSync(new Uint8Array(await srgBlob.arrayBuffer()));
+    const missingSrg = ["joined.srg"].filter(name => !srgZip[name]);
 
-    const blob = await cachedFetch(clientUrl, (percent) => {
-        progress.next(percent);
-    });
+    if (missingSrg.length > 0) {
+        throw new Error(`SRG mapping zip missing required files: ${missingSrg.join(", ")}. Found: ${Object.keys(srgZip).join(", ")}`);
+    }
 
-    const jar = await openJar(version.id, blob);
-    progress.next(undefined);
-    return { version: version.id, jar, blob };
+    const tinyBlob = await cachedFetch(TINY_MAPPINGS_URL);
+    const tinyJar = unzipSync(new Uint8Array(await tinyBlob.arrayBuffer()));
+    const missingTiny = ["mappings/mappings.tiny"].filter(name => !tinyJar[name]);
+
+    if (missingTiny.length > 0) {
+        throw new Error(`Tiny mapping jar missing required files: ${missingTiny.join(", ")}. Found: ${Object.keys(tinyJar).join(", ")}`);
+    }
+
+    const tinyMappings = parseLegacyTinyV2(strFromU8(tinyJar["mappings/mappings.tiny"]));
+
+    return {
+        srg: strFromU8(srgZip["joined.srg"]),
+        methodsCsv: tinyMappings.methodsCsv,
+        fieldsCsv: tinyMappings.fieldsCsv,
+        paramsCsv: tinyMappings.paramsCsv,
+    };
 }
 
-// Hardcode as these are never going to change.
-const EXPERIMENTAL_VERSIONS: VersionsList = {
-    versions: [
-        {
-            id: "25w45a_unobfuscated",
-            type: "unobfuscated",
-            url: "https://maven.fabricmc.net/net/minecraft/25w45a_unobfuscated.json",
-            time: "2025-11-04T14:07:08+00:00",
-            releaseTime: "2025-11-04T14:07:08+00:00",
-            sha1: "7a3c149f148b6aa5ac3af48c4f701adea7e5b615",
-        },
-        {
-            id: "25w46a_unobfuscated",
-            type: "unobfuscated",
-            url: "https://maven.fabricmc.net/net/minecraft/25w46a_unobfuscated.json",
-            time: "2025-11-11T13:20:54+00:00",
-            releaseTime: "2025-11-11T13:20:54+00:00",
-            sha1: "314ade2afeada364047798e163ef8e82427c69e1",
-        },
-        {
-            id: "1.21.11-pre1_unobfuscated",
-            type: "unobfuscated",
-            url: "https://maven.fabricmc.net/net/minecraft/1_21_11-pre1_unobfuscated.json",
-            time: "2025-11-19T08:30:46+00:00",
-            releaseTime: "2025-11-19T08:30:46+00:00",
-            sha1: "9c267f8dda2728bae55201a753cdd07b584709f1",
-        },
-        {
-            id: "1.21.11-pre2_unobfuscated",
-            type: "unobfuscated",
-            url: "https://maven.fabricmc.net/net/minecraft/1_21_11-pre2_unobfuscated.json",
-            time: "2025-11-21T12:07:21+00:00",
-            releaseTime: "2025-11-21T12:07:21+00:00",
-            sha1: "2955ce0af0512fdfe53ff0740b017344acf6f397",
-        },
-        {
-            id: "1.21.11-pre3_unobfuscated",
-            type: "unobfuscated",
-            url: "https://maven.fabricmc.net/net/minecraft/1_21_11-pre3_unobfuscated.json",
-            time: "2025-11-25T14:14:30+00:00",
-            releaseTime: "2025-11-25T14:14:30+00:00",
-            sha1: "579bf3428f72b5ea04883d202e4831bfdcb2aa8d",
-        },
-        {
-            id: "1.21.11-pre4_unobfuscated",
-            type: "unobfuscated",
-            url: "https://maven.fabricmc.net/net/minecraft/1_21_11-pre4_unobfuscated.json",
-            time: "2025-12-01T13:40:12+00:00",
-            releaseTime: "2025-12-01T13:40:12+00:00",
-            sha1: "410ce37a2506adcfd54ef7d89168cfbe89cac4cb",
-        },
-        {
-            id: "1.21.11-pre5_unobfuscated",
-            type: "unobfuscated",
-            url: "https://maven.fabricmc.net/net/minecraft/1_21_11-pre5_unobfuscated.json",
-            time: "2025-12-03T13:34:06+00:00",
-            releaseTime: "2025-12-03T13:34:06+00:00",
-            sha1: "1028441ca6d288bbf2103e773196bf524f7260fd",
-        },
-        {
-            id: "1.21.11-rc1_unobfuscated",
-            type: "unobfuscated",
-            url: "https://maven.fabricmc.net/net/minecraft/1_21_11-rc1_unobfuscated.json",
-            time: "2025-12-04T15:56:55+00:00",
-            releaseTime: "2025-12-04T15:56:55+00:00",
-            sha1: "5d3ee0ef1f0251cf7e073354ca9e085a884a643d",
-        },
-        {
-            id: "1.21.11-rc2_unobfuscated",
-            type: "unobfuscated",
-            url: "https://maven.fabricmc.net/net/minecraft/1_21_11-rc2_unobfuscated.json",
-            time: "2025-12-05T11:57:45+00:00",
-            releaseTime: "2025-12-05T11:57:45+00:00",
-            sha1: "9282a3fb154d2a425086c62c11827281308bf93b",
-        },
-        {
-            id: "1.21.11-rc3_unobfuscated",
-            type: "unobfuscated",
-            url: "https://maven.fabricmc.net/net/minecraft/1_21_11-rc3_unobfuscated.json",
-            time: "2025-12-08T13:59:34+00:00",
-            releaseTime: "2025-12-08T13:59:34+00:00",
-            sha1: "ce3f7ac6d0e9d23ea4e5f0354b91ff15039d9931",
-        },
-        {
-            id: "1.21.11_unobfuscated",
-            type: "unobfuscated",
-            url: "https://maven.fabricmc.net/net/minecraft/1_21_11_unobfuscated.json",
-            time: "2025-12-09T12:43:15+00:00",
-            releaseTime: "2025-12-09T12:43:15+00:00",
-            sha1: "327be7759157b04495c591dbb721875e341877af",
+async function downloadObfJar(): Promise<Blob> {
+    const versionManifest = await getJson<VersionManifest>(VERSION_MANIFEST_URL);
+    const clientUrl = versionManifest.downloads.client.url;
+
+    return cachedFetch(clientUrl, percent => {
+        downloadProgress.next(percent);
+    });
+}
+
+async function buildMinecraftJar(): Promise<MinecraftJar> {
+    const cacheKey = `mcsrc-deobf-${MINECRAFT_VERSION}-v${DEOBF_CACHE_VERSION}`;
+    const cache = 'caches' in window ? await caches.open(CACHE_NAME) : null;
+
+    if (cache) {
+        for (const request of await cache.keys()) {
+            const key = typeof request === "string" ? request : request.url;
+            if (key.includes(`mcsrc-deobf-${MINECRAFT_VERSION}-`) && !key.endsWith(cacheKey)) {
+                await cache.delete(request);
+            }
         }
-    ]
-};
+
+        const cached = await cache.match(cacheKey);
+        if (cached) {
+            const blob = await cached.blob();
+            const jar = await openJar(MINECRAFT_VERSION, blob);
+            return { version: MINECRAFT_VERSION, jar, blob };
+        }
+    }
+
+    remapStatus.next("Downloading Minecraft 1.7.10 jar...");
+    const obfBlob = await downloadObfJar();
+    downloadProgress.next(undefined);
+
+    remapStatus.next("Downloading MCP and LegacyMappings Tiny V2 mappings...");
+    const mappings = await downloadMappings();
+
+    remapStatus.next("Opening obfuscated jar...");
+    const obfJar = await openJar(MINECRAFT_VERSION + "-obf", obfBlob);
+
+    remapStatus.next("Remapping with LegacyMappings Tiny V2 names...");
+    const deobfBlob = await remapJar(obfJar, mappings);
+
+    if (cache) {
+        await cache.put(cacheKey, new Response(deobfBlob, { headers: { "content-type": "application/java-archive" } }));
+    }
+
+    remapStatus.next(undefined);
+    const jar = await openJar(MINECRAFT_VERSION, deobfBlob);
+    return { version: MINECRAFT_VERSION, jar, blob: deobfBlob };
+}

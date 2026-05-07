@@ -10,7 +10,6 @@ let runtimePreferWasm = true;
 export async function loadRuntime(preferWasm: boolean) {
     if (!runtime || runtimePreferWasm !== preferWasm) {
         runtimePreferWasm = preferWasm;
-        console.log(`Loading VineFlower ${preferWasm ? "WASM" : "JavaScript"} runtime`);
 
         let loadJs = !preferWasm;
         if (preferWasm) {
