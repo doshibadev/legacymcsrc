@@ -7,6 +7,7 @@
     "dev": "vite",
     "dev:javadoc": "vite --mode javadoc",
     "build": "tsc -b && vite build",
+    "build:full": "cd java && ./gradlew build && cd .. && npm run build",
     "build:javadoc": "tsc -b && vite build --mode javadoc",
     "preview": "vite preview",
     "test": "vitest run",
