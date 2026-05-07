@@ -84,7 +84,7 @@ export const EmptyState = () => {
                     textAlign: "center",
                     fontWeight: "500",
                 }}>
-                    legacymcsrc.dev is a browser-based tool for viewing decompiled Minecraft 1.7.10 Java Edition source code
+                    legacymcsrc.pages.dev is a browser-based tool for viewing decompiled Minecraft 1.7.10 Java Edition source code
                 </Paragraph>
 
                 <Paragraph style={{
