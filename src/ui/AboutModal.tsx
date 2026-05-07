@@ -27,7 +27,7 @@ const AboutModal = () => {
 
     return (
         <Modal
-            title="About mcsrc.dev"
+            title="About legacymcsrc.pages.dev"
             closable={accepted}
             open={isModalOpen}
             onCancel={handleCancel}

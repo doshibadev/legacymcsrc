@@ -84,7 +84,7 @@ export const EmptyState = () => {
                     textAlign: "center",
                     fontWeight: "500",
                 }}>
-                    mcsrc.dev is a browser-based tool for viewing decompiled Minecraft Java Edition source code
+                    legacymcsrc.dev is a browser-based tool for viewing decompiled Minecraft 1.7.10 Java Edition source code
                 </Paragraph>
 
                 <Paragraph style={{
@@ -179,7 +179,7 @@ export const EmptyState = () => {
                 </div>
 
                 <a
-                    href="https://github.com/FabricMC/mcsrc"
+                    href="https://github.com/doshibadev/legacymcsrc"
                     target="_blank"
                     rel="noreferrer"
                     style={{
