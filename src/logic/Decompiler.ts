@@ -38,7 +38,7 @@ const decompilerOptions = combineLatest([
 decompilerOptions.subscribe(v => worker.setOptions(v));
 
 export const currentResult = decompileResultPipeline(minecraftJar);
-export function decompileResultPipeline(jar: Observable<MinecraftJar>): Observable<DecompileResult | null> {
+export function decompileResultPipeline(jar: Observable<MinecraftJar>): Observable<DecompileResult | undefined> {
     return combineLatest([
         selectedFile,
         jar,
@@ -49,7 +49,7 @@ export function decompileResultPipeline(jar: Observable<MinecraftJar>): Observab
         throttleTime(250, undefined, { leading: true, trailing: true }),
         switchMap(([className, jar, bytecode]) => {
             if (!className) {
-                return of(null);
+                return of(undefined);
             }
 
             if (bytecode) {
